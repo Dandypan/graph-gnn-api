@@ -1,58 +1,100 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from utils.dataset import load_default_graph
+from schemas import GNNParams
 
+class GCNLayer(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(GCNLayer, self).__init__()
+        self.linear = nn.Linear(in_features, out_features)
 
-class GCN(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers, activation, regularization):
+    def forward(self, x, adj):
+        x = torch.matmul(adj, x)
+        return self.linear(x)
+
+class GCN(nn.Module):
+    def __init__(self, input_dim, hidden_dims, output_dim, activation):
         super(GCN, self).__init__()
-        self.regularization = regularization
-        self.activation = getattr(F, activation.lower())
+        dims = [input_dim] + hidden_dims + [output_dim]
+        self.layers = nn.ModuleList(
+            [GCNLayer(dims[i], dims[i+1]) for i in range(len(dims)-1)]
+        )
+        self.activation_fn = getattr(F, activation)
 
-        self.layers = torch.nn.ModuleList()
-        self.layers.append(GCNConv(input_dim, hidden_dim))
-        for _ in range(hidden_layers - 1):
-            self.layers.append(GCNConv(hidden_dim, hidden_dim))
-        self.layers.append(GCNConv(hidden_dim, output_dim))
-
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        for conv in self.layers[:-1]:
-            x = self.activation(conv(x, edge_index))
-        x = self.layers[-1](x, edge_index)
+    def forward(self, x, adj):
+        for i, layer in enumerate(self.layers):
+            x = layer(x, adj)
+            if i < len(self.layers) - 1:
+                x = self.activation_fn(x)
         return x
 
+def run_gcn(params: GNNParams):
+    data = load_default_graph(params.noise_1, params.noise_2)
+    x, adj, labels = data["x"], data["adj"], data["labels"]
 
-def train(G, features, labels, config):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    data = Data(x=features, edge_index=G.edge_index, y=labels).to(device)
+    X_train, X_test, y_train, y_test = train_test_split(
+        x, labels, train_size=params.train_test_ratio, stratify=labels
+    )
+
     model = GCN(
-        input_dim=features.shape[1],
-        hidden_dim=16,
-        output_dim=len(labels.unique()),
-        hidden_layers=config.hidden_layers,
-        activation=config.activation,
-        regularization=config.regularization
-    ).to(device)
+        input_dim=x.shape[1],
+        hidden_dims=params.hidden_layers,
+        output_dim=len(torch.unique(labels)),
+        activation=params.activation
+    )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.regularization_rate)
+    criterion = nn.CrossEntropyLoss() if params.problem_type == "classification" else nn.MSELoss()
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=params.learning_rate,
+        weight_decay=params.regularization_rate if params.regularization == "l2" else 0.0
+    )
 
-    model.train()
-    for epoch in range(config.epoch):
+    steps = [
+        f"GCN model initialized with {len(params.hidden_layers)} hidden layers: {params.hidden_layers}",
+        f"Activation function: {params.activation.upper()}",
+        f"Training GCN for {params.epoch} epochs..."
+    ]
+
+    for epoch in range(params.epoch):
+        model.train()
         optimizer.zero_grad()
-        out = model(data)
-        loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+        output = model(X_train, adj)
+        loss = criterion(output, y_train)
         loss.backward()
         optimizer.step()
 
     model.eval()
-    pred = model(data).argmax(dim=1)
-    correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
-    acc = correct / int(data.test_mask.sum())
+    with torch.no_grad():
+        pred_train = model(X_train, adj).argmax(dim=1)
+        pred_test = model(X_test, adj).argmax(dim=1)
+        acc_train = (pred_train == y_train).float().mean().item()
+        acc_test = (pred_test == y_test).float().mean().item()
+
+    steps += [
+        f"Training complete. Accuracy: {acc_train:.2f}, Loss: {loss.item():.2f}",
+        f"Evaluating on test set...",
+        f"Test Accuracy: {acc_test:.2f}"
+    ]
 
     return {
-        "accuracy": acc.item(),
-        "message": "GCN training complete"
+        "summary": {
+            "model": "GCN",
+            "layers": [x.shape[1]] + params.hidden_layers + [len(torch.unique(labels))],
+            "activation": params.activation.upper(),
+            "epochs": params.epoch,
+            "batch_size": params.batch_size
+        },
+        "train_metrics": {
+            "accuracy": acc_train,
+            "loss": loss.item()
+        },
+        "test_metrics": {
+            "accuracy": acc_test,
+            "loss": None
+        },
+        "steps": steps
     }
