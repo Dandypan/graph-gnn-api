@@ -1,83 +1,77 @@
-from models.gcn import GCN
-from utils.dataset import generate_synthetic_graph_data
 import torch
 import torch.nn.functional as F
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
-
-def run_gcn(req):
-
-    lr = req.learning_rate
-    activation = req.activation
-    regularization = req.regularization
-    reg_rate = req.regularization_rate
-    batch_size = req.batch_size
-    epochs = req.epoch
-    task_type = req.problem_type
-    hidden_layers = req.hidden_layers
-    train_ratio = req.train_test_ratio
-    noise_1 = req.noise_1
-    noise_2 = req.noise_2
+from torch.utils.data import DataLoader, random_split
+from models.gcn import GCN
+from models.gin import GIN
+from utils.dataset import load_graph_data
 
 
-    data = generate_synthetic_graph_data(noise_level_1=noise_1, noise_level_2=noise_2)
-    X, edge_index, y = data['features'], data['edge_index'], data['labels']
-    num_nodes, input_dim = X.shape
-    output_dim = 1 if task_type == "Regression" else len(torch.unique(y))
-
-  
-    split_idx = int(num_nodes * train_ratio)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-
-   
-    model = GCN(
-        input_dim=input_dim,
-        hidden_dim=16,
-        output_dim=output_dim,
-        num_layers=hidden_layers,
-        activation=activation
-    )
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+def get_activation_fn(name):
+    return {
+        "relu": F.relu,
+        "tanh": torch.tanh,
+        "sigmoid": torch.sigmoid
+    }.get(name, F.relu)
 
 
-    def regularization_loss():
-        if regularization == "L2":
-            return reg_rate * sum(torch.norm(p) for p in model.parameters())
-        elif regularization == "L1":
-            return reg_rate * sum(torch.norm(p, 1) for p in model.parameters())
-        return 0
+def apply_regularization(model, reg_type, reg_rate):
+    reg_loss = 0.0
+    if reg_type == "L1":
+        for param in model.parameters():
+            reg_loss += torch.sum(torch.abs(param))
+    elif reg_type == "L2":
+        for param in model.parameters():
+            reg_loss += torch.sum(param ** 2)
+    return reg_rate * reg_loss
 
 
-    history = []
-    for epoch in range(epochs):
+def train_and_predict(request):
+    # 1. Load and prepare data
+    data = load_graph_data(noise_1=request.noise_1, noise_2=request.noise_2)
+    num_nodes = data.num_nodes
+    input_dim = data.x.size(1)
+    output_dim = torch.max(data.y).item() + 1
+
+    # 2. Split dataset
+    train_size = int(num_nodes * request.train_test_ratio)
+    test_size = num_nodes - train_size
+    indices = torch.randperm(num_nodes)
+    train_idx, test_idx = indices[:train_size], indices[train_size:]
+
+    # 3. Initialize model
+    activation_fn = get_activation_fn(request.activation)
+    if request.algorithm == "GCN":
+        model = GCN(input_dim, request.hidden_layers, output_dim, activation_fn)
+    elif request.algorithm == "GIN":
+        model = GIN(input_dim, request.hidden_layers, output_dim, activation_fn)
+    else:
+        raise ValueError("Unsupported GNN algorithm")
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=request.learning_rate)
+
+    # 4. Train
+    logs = []
+    for epoch in range(1, request.epoch + 1):
         model.train()
-        out = model(X, edge_index)
-        loss_fn = F.mse_loss if task_type == "Regression" else F.cross_entropy
-        loss = loss_fn(out[:split_idx], y_train) + regularization_loss()
-
         optimizer.zero_grad()
+        out = model(data.x, data.edge_index)
+        loss = F.cross_entropy(out[train_idx], data.y[train_idx])
+        if request.regularization != "None":
+            loss += apply_regularization(model, request.regularization, request.regularization_rate)
         loss.backward()
         optimizer.step()
 
-        history.append({
-            "step": epoch + 1,
-            "info": f"Epoch {epoch+1} | Loss: {loss.item():.4f}"
-        })
+        acc = (out[test_idx].argmax(dim=1) == data.y[test_idx]).float().mean().item()
+        logs.append({"step": epoch, "description": f"Epoch {epoch}", "log": {"loss": loss.item(), "accuracy": acc}})
 
- 
-    model.eval()
-    pred = model(X, edge_index)
-    pred_labels = pred[split_idx:]
-    y_true = y_test
+    # 5. Final summary
+    final_out = model(data.x, data.edge_index)
+    final_acc = (final_out[test_idx].argmax(dim=1) == data.y[test_idx]).float().mean().item()
+    summary = {
+        "final_accuracy": final_acc,
+        "final_loss": loss.item(),
+        "model": request.algorithm,
+        "epochs": request.epoch
+    }
 
-    if task_type == "Classification":
-        pred_cls = torch.argmax(pred_labels, dim=1)
-        accuracy = (pred_cls == y_true).float().mean().item()
-        result = {"accuracy": round(accuracy, 4)}
-    else:
-        mse = F.mse_loss(pred_labels, y_true).item()
-        result = {"mse": round(mse, 4)}
-
-    return history, result
+    return {"steps": logs, "summary": summary}
