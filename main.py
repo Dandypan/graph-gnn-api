@@ -3,9 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from schemas import GNNRequest
 from gnn_runner import run_gnn
 
-app = FastAPI()
+app = FastAPI(title="Graph GNN API")
 
-# Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,6 +14,6 @@ app.add_middleware(
 )
 
 @app.post("/gnn/predict")
-def predict_gnn(req: GNNRequest):
-    steps, result = run_gnn(req)
-    return {"steps": steps, "result": result}
+async def predict(request: GNNRequest):
+    result = run_gnn(request)
+    return result
