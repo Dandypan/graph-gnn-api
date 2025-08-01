@@ -1,6 +1,9 @@
-
 fastapi
 uvicorn
-networkx
-torch
 pydantic
+networkx
+matplotlib
+scikit-learn
+torch
+torch_geometric
+python-multipart
