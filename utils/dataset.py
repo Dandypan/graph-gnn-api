@@ -1,4 +1,4 @@
-、import networkx as nx
+import networkx as nx
 from torch_geometric.data import Data
 import torch
 
