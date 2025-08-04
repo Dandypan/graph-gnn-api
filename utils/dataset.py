@@ -3,7 +3,7 @@ from torch_geometric.data import Data
 import torch
 
 
-def load_complex_locked_graph() -> Data:
+def  load_default_graph() -> Data:
     G = nx.Graph()
 
     # Clique 1: 10 nodes
