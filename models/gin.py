@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from utils.dataset import load_default_graph
-from schemas import GNNParams
+from schemas import GNNRequest
 
 class GINMLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
@@ -44,7 +44,7 @@ class GIN(nn.Module):
             x = self.activation_fn(x)
         return self.output_layer(x)
 
-def run_gin(params: GNNParams):
+def run_gin(params: GNNRequest):
     data = load_default_graph(params.noise_1, params.noise_2)
     x, adj, labels = data["x"], data["adj"], data["labels"]
 
