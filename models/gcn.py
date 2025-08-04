@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from utils.dataset import load_default_graph
-from schemas import GNNParams
+from schemas import GNNRequest
 
 class GCNLayer(nn.Module):
     def __init__(self, in_features, out_features):
@@ -31,7 +31,7 @@ class GCN(nn.Module):
                 x = self.activation_fn(x)
         return x
 
-def run_gcn(params: GNNParams):
+def run_gcn(params: GNNRequest):
     data = load_default_graph(params.noise_1, params.noise_2)
     x, adj, labels = data["x"], data["adj"], data["labels"]
 
