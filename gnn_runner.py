@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 from models.gcn import GCN
 from models.gin import GIN
-from utils.dataset import load_graph_data
+from utils.dataset import load_default_graph
 
 
 def get_activation_fn(name):
@@ -37,7 +37,7 @@ def train_and_predict(request):
     test_size = num_nodes - train_size
     indices = torch.randperm(num_nodes)
     train_idx, test_idx = indices[:train_size], indices[train_size:]
-
+    
     # 3. Initialize model
     activation_fn = get_activation_fn(request.activation)
     if request.algorithm == "GCN":
