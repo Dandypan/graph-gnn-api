@@ -27,7 +27,7 @@ def apply_regularization(model, reg_type, reg_rate):
 
 def train_and_predict(request):
     # 1. Load and prepare data
-    data = load_graph_data(noise_1=request.noise_1, noise_2=request.noise_2)
+    data = load_default_graph(noise_1=request.noise_1, noise_2=request.noise_2)
     num_nodes = data.num_nodes
     input_dim = data.x.size(1)
     output_dim = torch.max(data.y).item() + 1
