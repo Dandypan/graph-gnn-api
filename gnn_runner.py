@@ -37,7 +37,7 @@ def train_and_predict(request):
     test_size = num_nodes - train_size
     indices = torch.randperm(num_nodes)
     train_idx, test_idx = indices[:train_size], indices[train_size:]
-    
+
     # 3. Initialize model
     activation_fn = get_activation_fn(request.activation)
     if request.algorithm == "GCN":
@@ -49,7 +49,7 @@ def train_and_predict(request):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=request.learning_rate)
 
-    # 4. Train
+    # 4. Training loop
     logs = []
     for epoch in range(1, request.epoch + 1):
         model.train()
@@ -62,16 +62,39 @@ def train_and_predict(request):
         optimizer.step()
 
         acc = (out[test_idx].argmax(dim=1) == data.y[test_idx]).float().mean().item()
-        logs.append({"step": epoch, "description": f"Epoch {epoch}", "log": {"loss": loss.item(), "accuracy": acc}})
+        logs.append({
+            "step": epoch,
+            "description": f"Epoch {epoch}",
+            "log": {
+                "loss": round(loss.item(), 4),
+                "accuracy": round(acc, 4)
+            }
+        })
 
-    # 5. Final summary
+    # 5. Final predictions
+    model.eval()
     final_out = model(data.x, data.edge_index)
-    final_acc = (final_out[test_idx].argmax(dim=1) == data.y[test_idx]).float().mean().item()
+    probs = F.softmax(final_out, dim=1)
+    predicted_labels = torch.argmax(probs, dim=1)
+
+    predictions = []
+    for i in range(num_nodes):
+        predictions.append({
+            "node_id": i,
+            "label": predicted_labels[i].item(),
+            "probs": [round(p.item(), 4) for p in probs[i]]
+        })
+
+    final_acc = (predicted_labels[test_idx] == data.y[test_idx]).float().mean().item()
     summary = {
-        "final_accuracy": final_acc,
-        "final_loss": loss.item(),
+        "final_accuracy": round(final_acc, 4),
+        "final_loss": round(loss.item(), 4),
         "model": request.algorithm,
         "epochs": request.epoch
     }
 
-    return {"steps": logs, "summary": summary}
+    return {
+        "steps": logs,
+        "summary": summary,
+        "predictions": predictions
+    }
