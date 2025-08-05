@@ -42,12 +42,16 @@ def load_default_graph(noise_1=0.0, noise_2=0.0) -> Data:
                 G.add_edge(u, v)
                 added += 1
 
-    # TODO: Add noise_2 logic if needed (e.g. node feature noise or label flipping)
-
-    # Build PyG Data object
+    # Create initial features and labels
     edge_index = torch.tensor(list(G.edges()), dtype=torch.long).t().contiguous()
     x = torch.ones((G.number_of_nodes(), 10), dtype=torch.float)
     y = torch.randint(0, 2, (G.number_of_nodes(),), dtype=torch.long)
 
-    data = Data(x=x, edge_index=edge_index, y=y)
-    return data
+    # Add noise_2 type: flip random labels
+    if noise_2 > 0.0:
+        num_flips = int(noise_2 * len(y))
+        flip_indices = random.sample(range(len(y)), num_flips)
+        for idx in flip_indices:
+            y[idx] = 1 - y[idx]  # For binary labels: 0 <-> 1
+
+    return Data(x=x, edge_index=edge_index, y=y)
