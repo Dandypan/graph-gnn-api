@@ -15,5 +15,5 @@ app.add_middleware(
 
 @app.post("/gnn/predict")
 async def predict(request: GNNRequest):
-    result = run_gnn(request)
+    result = train_and_predict(request)
     return result
