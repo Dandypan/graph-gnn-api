@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from schemas import GNNRequest
-from gnn_runner import run_gnn
+from gnn_runner import train_and_predict
 
 app = FastAPI(title="Graph GNN API")
 
