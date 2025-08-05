@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
+from torch_geometric.utils import to_dense_adj
 from models.gcn import GCN
 from models.gin import GIN
 from utils.dataset import load_default_graph
 
 
 def get_activation_fn(name):
+    name = name.lower()
     return {
         "relu": F.relu,
         "tanh": torch.tanh,
@@ -26,14 +27,16 @@ def apply_regularization(model, reg_type, reg_rate):
 
 
 def train_and_predict(request):
-    # 1. Load and prepare data
+    # 1. Load graph and convert edge_index to dense adj
     data = load_default_graph(noise_1=request.noise_1, noise_2=request.noise_2)
     num_nodes = data.num_nodes
     input_dim = data.x.size(1)
     output_dim = torch.max(data.y).item() + 1
+    adj = to_dense_adj(data.edge_index)[0]
 
-    # 2. Split dataset
-    train_size = int(num_nodes * request.train_test_ratio)
+    # 2. Train/test split (allow int or percentage)
+    train_ratio = request.train_test_ratio / 100 if request.train_test_ratio > 1 else request.train_test_ratio
+    train_size = int(num_nodes * train_ratio)
     test_size = num_nodes - train_size
     indices = torch.randperm(num_nodes)
     train_idx, test_idx = indices[:train_size], indices[train_size:]
@@ -54,10 +57,12 @@ def train_and_predict(request):
     for epoch in range(1, request.epoch + 1):
         model.train()
         optimizer.zero_grad()
-        out = model(data.x, data.edge_index)
+        out = model(data.x, adj)
         loss = F.cross_entropy(out[train_idx], data.y[train_idx])
+
         if request.regularization != "None":
             loss += apply_regularization(model, request.regularization, request.regularization_rate)
+
         loss.backward()
         optimizer.step()
 
@@ -71,11 +76,12 @@ def train_and_predict(request):
             }
         })
 
-    # 5. Final predictions
+    # 5. Final evaluation
     model.eval()
-    final_out = model(data.x, data.edge_index)
-    probs = F.softmax(final_out, dim=1)
-    predicted_labels = torch.argmax(probs, dim=1)
+    with torch.no_grad():
+        final_out = model(data.x, adj)
+        probs = F.softmax(final_out, dim=1)
+        predicted_labels = torch.argmax(probs, dim=1)
 
     predictions = []
     for i in range(num_nodes):
@@ -86,11 +92,15 @@ def train_and_predict(request):
         })
 
     final_acc = (predicted_labels[test_idx] == data.y[test_idx]).float().mean().item()
+
     summary = {
         "final_accuracy": round(final_acc, 4),
         "final_loss": round(loss.item(), 4),
         "model": request.algorithm,
-        "epochs": request.epoch
+        "epochs": request.epoch,
+        "activation": request.activation,
+        "batch_size": request.batch_size,
+        "train_ratio": train_ratio
     }
 
     return {
